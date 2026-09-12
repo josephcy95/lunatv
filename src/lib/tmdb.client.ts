@@ -169,7 +169,7 @@ export async function searchTMDBMovie(
 } | null> {
   try {
     // v2 cache: soft scorer (avoid reusing first-result poison)
-    const cacheKey = getCacheKey('movie_search_v2', {
+    const cacheKey = getCacheKey('movie_search_v3', {
       title: title.trim(),
       year: year || '',
     });
@@ -268,7 +268,7 @@ export async function searchTMDBTV(
   vote_average: number;
 } | null> {
   try {
-    const cacheKey = getCacheKey('tv_search_v2', {
+    const cacheKey = getCacheKey('tv_search_v3', {
       title: title.trim(),
       year: year || '',
     });

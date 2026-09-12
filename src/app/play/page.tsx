@@ -51,6 +51,10 @@ import {
 } from '@/lib/db.client';
 import {} from '@/lib/douban.client';
 import { SearchResult } from '@/lib/types';
+import {
+  bilingualSearchVariants,
+  titlesLikelySameShow,
+} from '@/lib/title-match';
 import { searchStream } from '@/lib/search-stream';
 import { getVideoResolutionFromM3u8, VideoSourceTestResult } from '@/lib/utils';
 import { useSite } from '@/components/SiteProvider';
@@ -1530,6 +1534,11 @@ function PlayPageClient() {
       }
     }
 
+    // 双语标题拆分：罪人 Sinners → 罪人 / Sinners，提高跨源命中
+    bilingualSearchVariants(trimmed).forEach((variant) => {
+      if (!variants.includes(variant)) variants.push(variant);
+    });
+    // 也纳入 URL stitle / 播放标题另一侧语言（由调用方合并进 query 前也可）
     // 去重并返回
     return Array.from(new Set(variants));
   };
@@ -2949,44 +2958,95 @@ function PlayPageClient() {
       // 使用智能搜索变体获取全部源信息
       try {
         console.log('开始智能搜索，原始查询:', query);
-        const searchVariants = generateSearchVariants(query.trim());
+        // Merge variants from the play title AND stitle so CN-only / EN-only
+        // provider rows are discoverable from either landing URL.
+        const seedQueries = Array.from(
+          new Set(
+            [query, videoTitleRef.current, searchTitle]
+              .map((t) => (t || '').trim())
+              .filter(Boolean),
+          ),
+        );
+        const searchVariants = Array.from(
+          new Set(seedQueries.flatMap((q) => generateSearchVariants(q))),
+        );
         console.log('生成的搜索变体:', searchVariants);
 
         const allResults: SearchResult[] = [];
         let bestResults: SearchResult[] = [];
 
-        const publishIncrementalMatches = (results: SearchResult[]) => {
-          const queryTitle = videoTitleRef.current
-            .replaceAll(' ', '')
-            .toLowerCase();
-          const matches = results.filter((result) => {
-            if (
-              videoDoubanIdRef.current &&
-              videoDoubanIdRef.current > 0 &&
-              result.douban_id
-            ) {
-              return result.douban_id === videoDoubanIdRef.current;
-            }
+        const playTitleCandidates = Array.from(
+          new Set(
+            [
+              videoTitleRef.current,
+              searchTitle,
+              ...bilingualSearchVariants(videoTitleRef.current || ''),
+              ...bilingualSearchVariants(searchTitle || ''),
+            ]
+              .map((t) => (t || '').trim())
+              .filter(Boolean),
+          ),
+        );
+
+        const resultMatchesCurrentShow = (result: SearchResult): boolean => {
+          const yearMatch = matchesRequestedYear(
+            result.year || '',
+            videoYearRef.current,
+          );
+          const resultIsMovie = inferIsMovie(
+            result.type_name,
+            result.episodes.length,
+          );
+          const typeMatch =
+            !searchType ||
+            (searchType === 'movie' ? resultIsMovie : !resultIsMovie);
+          if (!yearMatch || !typeMatch) return false;
+
+          // Douban id agreement is sufficient when both sides have one.
+          if (
+            videoDoubanIdRef.current &&
+            videoDoubanIdRef.current > 0 &&
+            result.douban_id &&
+            result.douban_id === videoDoubanIdRef.current
+          ) {
+            return true;
+          }
+
+          // Never let a *different* douban_id short-circuit title matching away;
+          // only positive agreement above is special-cased.
+          for (const candidate of playTitleCandidates) {
+            if (titlesLikelySameShow(candidate, result.title)) return true;
+            const queryTitle = candidate.replaceAll(' ', '').toLowerCase();
             const resultTitle = result.title.replaceAll(' ', '').toLowerCase();
-            const titleMatch =
+            if (
               resultTitle === queryTitle ||
               resultTitle.includes(queryTitle) ||
               queryTitle.includes(resultTitle) ||
               (queryTitle.length > 4 &&
-                checkAllKeywordsMatch(queryTitle, resultTitle));
-            const yearMatch = matchesRequestedYear(
-              result.year || '',
-              videoYearRef.current,
-            );
-            const resultIsMovie = inferIsMovie(
-              result.type_name,
-              result.episodes.length,
-            );
-            const typeMatch =
-              !searchType ||
-              (searchType === 'movie' ? resultIsMovie : !resultIsMovie);
-            return titleMatch && yearMatch && typeMatch;
-          });
+                checkAllKeywordsMatch(queryTitle, resultTitle))
+            ) {
+              // Guard short Latin titles: "Sinners" must not absorb
+              // "In the Land of Saints and Sinners" via includes alone.
+              if (
+                titlesLikelySameShow(candidate, result.title) ||
+                resultTitle === queryTitle ||
+                // bilingual / CJK contains still OK
+                /[㐀-鿿]/.test(candidate) ||
+                /[㐀-鿿]/.test(result.title) ||
+                // equal significant length ratio for latin contains
+                Math.min(queryTitle.length, resultTitle.length) /
+                  Math.max(queryTitle.length, resultTitle.length) >=
+                  0.6
+              ) {
+                return true;
+              }
+            }
+          }
+          return false;
+        };
+
+        const publishIncrementalMatches = (results: SearchResult[]) => {
+          const matches = results.filter(resultMatchesCurrentShow);
 
           if (!matches.length) return;
           setAvailableSources((previous) => {
@@ -3042,78 +3102,26 @@ function PlayPageClient() {
           const data = { results: variantResults };
 
           if (data.results && data.results.length > 0) {
-            // 移除早期退出策略，让downstream的相关性评分发挥作用
-
-            // 处理搜索结果，使用分级匹配：精确匹配优先，避免短标题误匹配
-            const queryTitle = videoTitleRef.current
-              .replaceAll(' ', '')
-              .toLowerCase();
-
-            const matchYearAndType = (result: SearchResult) => {
-              const yearMatch = matchesRequestedYear(
-                result.year || '',
-                videoYearRef.current,
-              );
-              // 优先按 type_name 判定 movie/series，回退到集数。避免把每条只带 1 集
-              // 的 YOGURT 剧集当成电影而在换源匹配阶段被丢弃。
-              const resultIsMovie = inferIsMovie(
-                result.type_name,
-                result.episodes.length,
-              );
-              const wantMovie = searchType === 'movie';
-              const typeMatch =
-                !searchType || (wantMovie ? resultIsMovie : !resultIsMovie);
-              return yearMatch && typeMatch;
-            };
-
-            // 第一优先级：精确匹配（标题完全相等，或去除数字/标点后相等）
-            const exactResults = data.results.filter((result: SearchResult) => {
-              if (
-                videoDoubanIdRef.current &&
-                videoDoubanIdRef.current > 0 &&
-                result.douban_id
-              ) {
-                return result.douban_id === videoDoubanIdRef.current;
-              }
-              const resultTitle = result.title
-                .replaceAll(' ', '')
-                .toLowerCase();
-              const exactMatch =
-                resultTitle === queryTitle ||
-                resultTitle.replace(/\d+|[：:]/g, '') ===
-                  queryTitle.replace(/\d+|[：:]/g, '');
-              return exactMatch && matchYearAndType(result);
-            });
-
-            // 第二优先级：宽松包含匹配（仅当精确匹配无结果时使用）
-            let filteredResults = exactResults;
-            if (exactResults.length === 0) {
-              filteredResults = data.results.filter((result: SearchResult) => {
-                if (
-                  videoDoubanIdRef.current &&
-                  videoDoubanIdRef.current > 0 &&
-                  result.douban_id
-                ) {
-                  return result.douban_id === videoDoubanIdRef.current;
-                }
-                const resultTitle = result.title
-                  .replaceAll(' ', '')
-                  .toLowerCase();
-                const titleMatch =
-                  resultTitle.includes(queryTitle) ||
-                  queryTitle.includes(resultTitle) ||
-                  (queryTitle.length > 4 &&
-                    checkAllKeywordsMatch(queryTitle, resultTitle));
-                return titleMatch && matchYearAndType(result);
-              });
-            }
+            // UNION matches across variants — never drop a source+id because a
+            // bilingual exact hit appeared first (e.g. 罪人 Sinners exact would
+            // previously exclude Yogurt titled only 罪人 / Sinners).
+            const filteredResults = data.results.filter(
+              resultMatchesCurrentShow,
+            );
 
             if (filteredResults.length > 0) {
               console.log(
-                `变体 "${variant}" 找到 ${filteredResults.length} 个匹配结果（${exactResults.length > 0 ? '精确' : '宽松'}匹配）`,
+                `变体 "${variant}" 找到 ${filteredResults.length} 个匹配结果（双语/同名 UNION）`,
               );
-              bestResults = filteredResults;
-              break; // 找到匹配就停止
+              const merged = new Map(
+                bestResults.map((item) => [`${item.source}-${item.id}`, item]),
+              );
+              filteredResults.forEach((item) =>
+                merged.set(`${item.source}-${item.id}`, item),
+              );
+              bestResults = Array.from(merged.values());
+              // Keep searching remaining variants so CN/EN keyword searches
+              // can discover provider rows the first query missed.
             }
           }
         }

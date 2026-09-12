@@ -1,4 +1,5 @@
 import {
+  isConfidentTMDBMatch,
   mergeCandidatesById,
   normalizeTitle,
   pickBestTMDBCandidate,
@@ -8,6 +9,11 @@ import {
   titleSimilarity,
   type TMDBSearchCandidate,
 } from './tmdb-match';
+import {
+  bilingualSearchVariants,
+  clusterBySameShow,
+  titlesLikelySameShow,
+} from './title-match';
 
 describe('normalizeTitle', () => {
   it('strips punctuation and lowercases', () => {
@@ -161,13 +167,151 @@ describe('2026 痴迷 → Obsession (1339713)', () => {
     expect(best?.candidate.id).toBe(1339713);
   });
 
-  it('falls back to best available rather than null when only weak hits exist', () => {
+  it('returns null rather than a confident-wrong year-mismatched hit', () => {
     const onlyOld = pickBestTMDBCandidate([wrong], {
       query: '痴迷',
       year: '2026',
       mediaType: 'movie',
     });
+    expect(onlyOld).toBeNull();
+  });
+
+  it('allowFallback still returns weak best-effort when explicitly requested', () => {
+    const onlyOld = pickBestTMDBCandidate(
+      [wrong],
+      { query: '痴迷', year: '2026', mediaType: 'movie' },
+      { allowFallback: true },
+    );
     expect(onlyOld?.candidate.id).toBe(590570);
+  });
+});
+
+/**
+ * Case 3: "Sinners" / "罪人" / 2025 must pick Ryan Coogler Sinners (1233413)
+ * over The Tree of Sinners (substring false friend).
+ */
+describe('2025 Sinners / 罪人 → TMDB 1233413 not Tree of Sinners', () => {
+  const tree: TMDBSearchCandidate = {
+    id: 999001,
+    title: 'The Tree of Sinners',
+    original_title: 'The Tree of Sinners',
+    release_date: '2018-01-01',
+    popularity: 3,
+    vote_count: 20,
+    alternativeTitles: ['罪人'],
+  };
+  const correct: TMDBSearchCandidate = {
+    id: 1233413,
+    title: 'Sinners',
+    original_title: 'Sinners',
+    release_date: '2025-04-18',
+    popularity: 120,
+    vote_count: 5000,
+    alternativeTitles: ['罪人'],
+  };
+  const correctZh: TMDBSearchCandidate = {
+    id: 1233413,
+    title: '罪人',
+    original_title: 'Sinners',
+    release_date: '2025-04-18',
+    popularity: 120,
+    vote_count: 5000,
+  };
+
+  it('English query prefers exact Sinners over Tree of Sinners', () => {
+    const best = pickBestTMDBCandidate([tree, correct], {
+      query: 'Sinners',
+      year: '2025',
+      mediaType: 'movie',
+    });
+    expect(best?.candidate.id).toBe(1233413);
+    const treeScore = scoreTMDBCandidate(tree, {
+      query: 'Sinners',
+      year: '2025',
+      mediaType: 'movie',
+    });
+    expect(treeScore.breakdown.title).toBeLessThan(40);
+  });
+
+  it('Chinese 罪人 + year prefers Coogler Sinners via alt/primary', () => {
+    const best = pickBestTMDBCandidate([tree, correctZh], {
+      query: '罪人',
+      secondaryQuery: 'Sinners',
+      year: '2025',
+      mediaType: 'movie',
+    });
+    expect(best?.candidate.id).toBe(1233413);
+  });
+
+  it('rejects Tree of Sinners alone when year disagrees', () => {
+    const best = pickBestTMDBCandidate([tree], {
+      query: 'Sinners',
+      year: '2025',
+      mediaType: 'movie',
+    });
+    expect(best).toBeNull();
+    expect(
+      isConfidentTMDBMatch(
+        scoreTMDBCandidate(tree, {
+          query: 'Sinners',
+          year: '2025',
+          mediaType: 'movie',
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('titlesLikelySameShow / clusterBySameShow', () => {
+  it('merges bilingual variants of Sinners without false friends', () => {
+    expect(titlesLikelySameShow('Sinners', '罪人 Sinners')).toBe(true);
+    expect(titlesLikelySameShow('罪人', '罪人 Sinners')).toBe(true);
+    expect(
+      titlesLikelySameShow('Sinners', 'In the Land of Saints and Sinners'),
+    ).toBe(false);
+    expect(
+      titlesLikelySameShow(
+        'Sinners',
+        'PSYCHO-PASS サイコパス Sinners of the System',
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps both Yogurt ids when clustering same show', () => {
+    const items = [
+      { title: 'Sinners', year: '2025', source: 'YOGURT', id: '2137530' },
+      { title: '罪人', year: '2025', source: 'YOGURT', id: '2137458' },
+      {
+        title: '罪人 Sinners',
+        year: '2025',
+        source: 'www.maoyanzy.com',
+        id: '150612',
+      },
+      {
+        title: 'In the Land of Saints and Sinners',
+        year: '2023',
+        source: 'YOGURT',
+        id: '9',
+      },
+    ];
+    // Note: pure EN "Sinners" vs pure CN "罪人" intentionally do not merge
+    // without a shared token — false-split OK. Bilingual bridges them.
+    const clusters = clusterBySameShow(items, () => 'movie');
+    const sinnersCluster = clusters.find(([, g]) =>
+      g.some((x) => x.id === '150612'),
+    );
+    expect(sinnersCluster).toBeTruthy();
+    const ids = sinnersCluster![1].map((x) => x.id).sort();
+    expect(ids).toEqual(['150612', '2137458', '2137530'].sort());
+    // both yogurt ids present
+    expect(ids).toContain('2137530');
+    expect(ids).toContain('2137458');
+  });
+
+  it('bilingualSearchVariants extracts CN and EN', () => {
+    expect(bilingualSearchVariants('罪人 Sinners')).toEqual(
+      expect.arrayContaining(['罪人 Sinners', '罪人', 'Sinners']),
+    );
   });
 });
 

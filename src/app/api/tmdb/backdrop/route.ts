@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
   if (!apiKey) return NextResponse.json({ data: null });
 
   // v2: soft scorer + year hint — bust poisoned first-result caches
-  const cacheKey = `tmdb-backdrop-v2-${originalTitle || title}-${year || ''}-${stype || ''}`;
+  const cacheKey = `tmdb-backdrop-v3-${originalTitle || title}-${year || ''}-${stype || ''}`;
 
   // 服务端缓存 — ignore legacy entries missing tmdb id (needed for MDBList)
   const cached = await db.getCache(cacheKey);
