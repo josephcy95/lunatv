@@ -276,7 +276,19 @@ function ShortDramaCard({
     <>
       <div
         className={`group relative ${className} transition-transform hover:scale-[1.02] cursor-pointer`}
-        onClick={handleClick}
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+            e.preventDefault();
+            handlePlayInNewTab();
+            return;
+          }
+          handleClick();
+        }}
+        onAuxClick={(e) => {
+          if (e.button !== 1) return;
+          e.preventDefault();
+          handlePlayInNewTab();
+        }}
         onMouseEnter={handlePrefetch}
         onFocus={handlePrefetch}
         {...longPressProps}

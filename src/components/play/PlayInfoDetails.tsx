@@ -104,7 +104,7 @@ export function DetailsTab({
           {tmdbAlias && (
             <div>
               <span className='font-semibold text-gray-700 dark:text-gray-300'>
-                TMDB 别名:{' '}
+                别名:{' '}
               </span>
               <span className='text-gray-600 dark:text-gray-400'>
                 {tmdbAlias}
@@ -191,7 +191,7 @@ export function DetailsTab({
         <div className='space-y-2'>
           <div>
             <span className='font-semibold text-gray-700 dark:text-gray-300'>
-              TMDB 别名:{' '}
+              别名:{' '}
             </span>
             <span className='text-gray-600 dark:text-gray-400'>
               {tmdbAlias}

@@ -313,160 +313,104 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       [from, actualSource, actualId, onDelete, deletePlayRecordMutation],
     );
 
+    const playHref = useMemo(() => {
+      const doubanIdParam =
+        actualDoubanId && actualDoubanId > 0
+          ? `&douban_id=${actualDoubanId}`
+          : '';
+
+      if (origin === 'live' && actualSource && actualId) {
+        return `/live?source=${actualSource.replace('live_', '')}&id=${actualId.replace('live_', '')}`;
+      }
+      if (actualSource === 'shortdrama' && actualId) {
+        return `/play?title=${encodeURIComponent(actualTitle.trim())}&shortdrama_id=${actualId}`;
+      }
+      if (
+        from === 'douban' ||
+        (isAggregate && !actualSource && !actualId) ||
+        actualSource === 'douban' ||
+        actualSource === 'bangumi'
+      ) {
+        return `/play?title=${encodeURIComponent(actualTitle.trim())}${
+          actualYear ? `&year=${actualYear}` : ''
+        }${doubanIdParam}${actualSearchType ? `&stype=${actualSearchType}` : ''}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}`;
+      }
+      if (actualSource && actualId) {
+        return `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
+          actualTitle,
+        )}${actualYear ? `&year=${actualYear}` : ''}${doubanIdParam}${
+          isAggregate ? '&prefer=true' : ''
+        }${
+          actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
+        }${actualSearchType ? `&stype=${actualSearchType}` : ''}`;
+      }
+      return '';
+    }, [
+      origin,
+      from,
+      actualSource,
+      actualId,
+      actualTitle,
+      actualYear,
+      isAggregate,
+      actualQuery,
+      actualSearchType,
+      actualDoubanId,
+    ]);
+
+    const isExternalCardControl = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      return !!el?.closest('a[href^="http"], [data-button]');
+    };
+
     // 🚀 数据预取 - 在 hover 时预取收藏数据和预加载路由
     const handlePrefetch = useCallback(() => {
       if (!actualSource || !actualId) return;
 
-      // 预取收藏数据
       queryClient.prefetchQuery({
         queryKey: ['favorites'],
         queryFn: async () => {
-          // 这里可以预取收藏列表或检查收藏状态
-          // 由于我们使用 IndexedDB，这个操作很快，主要是为了保持缓存新鲜
           return queryClient.getQueryData(['favorites']) || {};
         },
-        staleTime: 10 * 1000, // 10秒内不重复预取
+        staleTime: 10 * 1000,
       });
 
-      // 🔥 预加载播放页面路由 - 关键优化！
-      const doubanIdParam =
-        actualDoubanId && actualDoubanId > 0
-          ? `&douban_id=${actualDoubanId}`
-          : '';
-
-      if (origin === 'live' && actualSource && actualId) {
-        const url = `/live?source=${actualSource.replace('live_', '')}&id=${actualId.replace('live_', '')}`;
-        router.prefetch(url);
-      } else if (actualSource === 'shortdrama' && actualId) {
-        const url = `/play?title=${encodeURIComponent(actualTitle.trim())}&shortdrama_id=${actualId}`;
-        router.prefetch(url);
-      } else if (
-        from === 'douban' ||
-        (isAggregate && !actualSource && !actualId) ||
-        actualSource === 'douban' ||
-        actualSource === 'bangumi'
-      ) {
-        const url = `/play?title=${encodeURIComponent(actualTitle.trim())}${actualYear ? `&year=${actualYear}` : ''}${doubanIdParam}${actualSearchType ? `&stype=${actualSearchType}` : ''}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}`;
-        router.prefetch(url);
-      } else if (actualSource && actualId) {
-        const url = `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(actualTitle)}${actualYear ? `&year=${actualYear}` : ''}${doubanIdParam}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}${actualSearchType ? `&stype=${actualSearchType}` : ''}`;
-        router.prefetch(url);
-      }
-    }, [
-      actualSource,
-      actualId,
-      queryClient,
-      router,
-      origin,
-      actualTitle,
-      actualYear,
-      actualDoubanId,
-      actualSearchType,
-      isAggregate,
-      actualQuery,
-      from,
-    ]);
+      if (playHref) router.prefetch(playHref);
+    }, [actualSource, actualId, queryClient, router, playHref]);
 
     const handleClick = useCallback(() => {
-      // 🔥 立即显示加载状态，提供即时反馈
+      if (!playHref) return;
       setIsNavigating(true);
+      router.push(playHref);
+    }, [playHref, router]);
 
-      // 构建豆瓣ID参数
-      const doubanIdParam =
-        actualDoubanId && actualDoubanId > 0
-          ? `&douban_id=${actualDoubanId}`
-          : '';
-
-      if (origin === 'live' && actualSource && actualId) {
-        // 直播内容跳转到直播页面
-        const url = `/live?source=${actualSource.replace('live_', '')}&id=${actualId.replace('live_', '')}`;
-        router.push(url);
-      } else if (actualSource === 'shortdrama' && actualId) {
-        // 短剧内容 - 使用shortdrama_id参数
-        const url = `/play?title=${encodeURIComponent(actualTitle.trim())}&shortdrama_id=${actualId}`;
-        router.push(url);
-      } else if (
-        from === 'douban' ||
-        (isAggregate && !actualSource && !actualId) ||
-        actualSource === 'douban' ||
-        actualSource === 'bangumi'
-      ) {
-        // 豆瓣内容 或 聚合搜索 或 Bangumi番剧 - 只用标题和年份搜索
-        const url = `/play?title=${encodeURIComponent(actualTitle.trim())}${
-          actualYear ? `&year=${actualYear}` : ''
-        }${doubanIdParam}${actualSearchType ? `&stype=${actualSearchType}` : ''}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}`;
-        router.push(url);
-      } else if (actualSource && actualId) {
-        const url = `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
-          actualTitle,
-        )}${actualYear ? `&year=${actualYear}` : ''}${doubanIdParam}${
-          isAggregate ? '&prefer=true' : ''
-        }${
-          actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
-        }${actualSearchType ? `&stype=${actualSearchType}` : ''}`;
-        router.push(url);
-      }
-    }, [
-      origin,
-      from,
-      actualSource,
-      actualId,
-      router,
-      actualTitle,
-      actualYear,
-      isAggregate,
-      actualQuery,
-      actualSearchType,
-      actualDoubanId,
-    ]);
-
-    // 新标签页播放处理函数
     const handlePlayInNewTab = useCallback(() => {
-      // 构建豆瓣ID参数
-      const doubanIdParam =
-        actualDoubanId && actualDoubanId > 0
-          ? `&douban_id=${actualDoubanId}`
-          : '';
+      if (!playHref) return;
+      window.open(playHref, '_blank');
+    }, [playHref]);
 
-      if (origin === 'live' && actualSource && actualId) {
-        // 直播内容跳转到直播页面
-        const url = `/live?source=${actualSource.replace('live_', '')}&id=${actualId.replace('live_', '')}`;
-        window.open(url, '_blank');
-      } else if (actualSource === 'shortdrama' && actualId) {
-        // 短剧内容 - 使用shortdrama_id参数
-        const url = `/play?title=${encodeURIComponent(actualTitle.trim())}&shortdrama_id=${actualId}`;
-        window.open(url, '_blank');
-      } else if (
-        from === 'douban' ||
-        (isAggregate && !actualSource && !actualId) ||
-        actualSource === 'douban' ||
-        actualSource === 'bangumi'
-      ) {
-        // 豆瓣内容 或 聚合搜索 或 Bangumi番剧 - 只用标题和年份搜索
-        const url = `/play?title=${encodeURIComponent(actualTitle.trim())}${actualYear ? `&year=${actualYear}` : ''}${doubanIdParam}${actualSearchType ? `&stype=${actualSearchType}` : ''}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}`;
-        window.open(url, '_blank');
-      } else if (actualSource && actualId) {
-        const url = `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
-          actualTitle,
-        )}${actualYear ? `&year=${actualYear}` : ''}${doubanIdParam}${
-          isAggregate ? '&prefer=true' : ''
-        }${
-          actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
-        }${actualSearchType ? `&stype=${actualSearchType}` : ''}`;
-        window.open(url, '_blank');
-      }
-    }, [
-      origin,
-      from,
-      actualSource,
-      actualId,
-      actualTitle,
-      actualYear,
-      isAggregate,
-      actualQuery,
-      actualSearchType,
-      actualDoubanId,
-    ]);
+    const handleCardClick = useCallback(
+      (e: React.MouseEvent) => {
+        if (isExternalCardControl(e.target)) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+          e.preventDefault();
+          handlePlayInNewTab();
+          return;
+        }
+        handleClick();
+      },
+      [handleClick, handlePlayInNewTab],
+    );
+
+    const handleCardAuxClick = useCallback(
+      (e: React.MouseEvent) => {
+        if (e.button !== 1) return;
+        if (isExternalCardControl(e.target)) return;
+        e.preventDefault();
+        handlePlayInNewTab();
+      },
+      [handlePlayInNewTab],
+    );
 
     // 长按操作
     const handleLongPress = useCallback(() => {
@@ -715,7 +659,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       <>
         <div
           className='@container group relative w-full cursor-pointer transition-transform duration-300 ease-out hover:-translate-y-1'
-          onClick={handleClick}
+          onClick={handleCardClick}
+          onAuxClick={handleCardAuxClick}
           onMouseEnter={handlePrefetch}
           onFocus={handlePrefetch}
           {...longPressProps}
