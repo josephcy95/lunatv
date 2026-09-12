@@ -168,6 +168,11 @@ async function fetchFromMobileAPI(id: string): Promise<{
       data: {
         id: data.id,
         title: data.title,
+        original_title: pickDoubanOriginalTitle(
+          data.title || '',
+          data.original_title,
+          Array.isArray(data.aka) ? data.aka : undefined,
+        ),
         poster: data.pic?.large || data.pic?.normal || '',
         rate: data.rating?.value ? data.rating.value.toFixed(1) : '0.0',
         year: data.year || '',
@@ -831,6 +836,23 @@ export async function GET(request: Request) {
   }
 }
 
+function pickDoubanOriginalTitle(
+  chineseTitle: string,
+  original?: string | null,
+  akas?: string[] | null,
+): string {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  for (const raw of [original, ...(akas || [])]) {
+    const s = String(raw || '').trim();
+    if (!s || s === chineseTitle || seen.has(s)) continue;
+    seen.add(s);
+    candidates.push(s);
+  }
+  const latin = candidates.find((s) => /[A-Za-z]/.test(s));
+  return latin || candidates[0] || '';
+}
+
 function parseDoubanDetails(html: string, id: string) {
   try {
     // 提取基本信息
@@ -856,6 +878,25 @@ function parseDoubanDetails(html: string, id: string) {
       /<span[^>]*class="year">[(]([^)]+)[)]<\/span>/,
     );
     const year = yearMatch ? yearMatch[1] : '';
+
+    // 原名 / 又名 — supporting title for TMDB (RT needs a TMDB id, not Chinese)
+    const htmlOrigMatch = html.match(
+      /<span[^>]*class="pl">原名:<\/span>\s*([^<]+)/,
+    );
+    const htmlAkaMatch = html.match(
+      /<span[^>]*class="pl">又名:<\/span>\s*([^<]+)/,
+    );
+    const htmlAkas = htmlAkaMatch
+      ? htmlAkaMatch[1]
+          .split('/')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+    const original_title = pickDoubanOriginalTitle(
+      title,
+      htmlOrigMatch ? htmlOrigMatch[1].trim() : '',
+      htmlAkas,
+    );
 
     // 根据真实HTML结构提取导演、编剧、主演
     let directors: string[] = [];
@@ -1177,6 +1218,7 @@ function parseDoubanDetails(html: string, id: string) {
       data: {
         id,
         title,
+        original_title,
         poster: poster.replace(/^http:/, 'https:'),
         rate,
         year,

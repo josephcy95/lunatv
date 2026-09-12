@@ -27,6 +27,7 @@ export interface DoubanCelebrity {
 export interface DoubanRecommendation {
   id: string;
   title: string;
+  original_title?: string;
   poster: string;
   rate: string;
 }
