@@ -358,11 +358,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       actualDoubanId,
     ]);
 
-    const isExternalCardControl = (target: EventTarget | null) => {
-      const el = target as HTMLElement | null;
-      return !!el?.closest('a[href^="http"], [data-button]');
-    };
-
     // 🚀 数据预取 - 在 hover 时预取收藏数据和预加载路由
     const handlePrefetch = useCallback(() => {
       if (!actualSource || !actualId) return;
@@ -389,27 +384,22 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       window.open(playHref, '_blank');
     }, [playHref]);
 
-    const handleCardClick = useCallback(
-      (e: React.MouseEvent) => {
-        if (isExternalCardControl(e.target)) return;
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
-          e.preventDefault();
-          handlePlayInNewTab();
+    const handleAnchorClick = useCallback(
+      (e: React.MouseEvent<HTMLAnchorElement>) => {
+        // Let the browser handle new-tab gestures (middle / ctrl / cmd / shift).
+        if (
+          e.metaKey ||
+          e.ctrlKey ||
+          e.shiftKey ||
+          e.altKey ||
+          e.button === 1
+        ) {
           return;
         }
+        e.preventDefault();
         handleClick();
       },
-      [handleClick, handlePlayInNewTab],
-    );
-
-    const handleCardAuxClick = useCallback(
-      (e: React.MouseEvent) => {
-        if (e.button !== 1) return;
-        if (isExternalCardControl(e.target)) return;
-        e.preventDefault();
-        handlePlayInNewTab();
-      },
-      [handlePlayInNewTab],
+      [handleClick],
     );
 
     // 长按操作
@@ -659,8 +649,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       <>
         <div
           className='@container group relative w-full cursor-pointer transition-transform duration-300 ease-out hover:-translate-y-1'
-          onClick={handleCardClick}
-          onAuxClick={handleCardAuxClick}
           onMouseEnter={handlePrefetch}
           onFocus={handlePrefetch}
           {...longPressProps}
@@ -709,6 +697,14 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
               return false;
             }}
           >
+            {playHref ? (
+              <a
+                href={playHref}
+                className='absolute inset-0 z-[1]'
+                aria-label={actualTitle}
+                onClick={handleAnchorClick}
+              />
+            ) : null}
             {/* 骨架屏 */}
             {!isLoading && <ImagePlaceholder aspectRatio='aspect-[2/3]' />}
             {/* 图片 */}
@@ -790,8 +786,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             {/* 播放按钮 / 加载状态 */}
             {config.showPlayButton && (
               <div
-                data-button='true'
-                className={`absolute inset-0 flex items-center justify-center transition-all duration-300 ease-in-out ${
+                className={`pointer-events-none absolute inset-0 z-[2] flex items-center justify-center transition-all duration-300 ease-in-out ${
                   isNavigating
                     ? 'opacity-100 scale-100'
                     : 'opacity-0 delay-75 group-hover:opacity-100 group-hover:scale-100'
@@ -848,7 +843,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
               from !== 'favorite' && (
                 <div
                   data-button='true'
-                  className='absolute bottom-3 right-3 flex gap-3 opacity-0 translate-y-2 transition-all duration-300 ease-in-out sm:group-hover:opacity-100 sm:group-hover:translate-y-0'
+                  className='absolute bottom-3 right-3 z-[3] flex gap-3 opacity-0 translate-y-2 transition-all duration-300 ease-in-out sm:group-hover:opacity-100 sm:group-hover:translate-y-0'
                   style={
                     {
                       WebkitUserSelect: 'none',
@@ -1054,7 +1049,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                   target='_blank'
                   rel='noopener noreferrer'
                   onClick={(e) => e.stopPropagation()}
-                  className='absolute top-2 left-2 opacity-0 -translate-x-2 transition-all duration-300 ease-in-out delay-100 sm:group-hover:opacity-100 sm:group-hover:translate-x-0'
+                  className='absolute top-2 left-2 z-[3] opacity-0 -translate-x-2 transition-all duration-300 ease-in-out delay-100 sm:group-hover:opacity-100 sm:group-hover:translate-x-0'
                   style={
                     {
                       WebkitUserSelect: 'none',
@@ -1277,8 +1272,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             }}
           >
             <div className='relative px-1'>
-              <span
-                className='block text-xs @[140px]:text-sm font-semibold tracking-tight line-clamp-2 text-gray-900 transition-colors duration-300 group-hover:text-green-700 dark:text-gray-100 dark:group-hover:text-green-300'
+              <a
+                href={playHref || undefined}
+                onClick={playHref ? handleAnchorClick : undefined}
+                className='block text-xs @[140px]:text-sm font-semibold tracking-tight line-clamp-2 text-gray-900 no-underline transition-colors duration-300 group-hover:text-green-700 dark:text-gray-100 dark:group-hover:text-green-300'
                 style={
                   {
                     WebkitUserSelect: 'none',
@@ -1297,7 +1294,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
                 }}
               >
                 {actualTitle}
-              </span>
+              </a>
               {/* 增强的 tooltip */}
               <div
                 className='absolute bottom-full left-0 mb-2 px-3 py-2 bg-linear-to-br from-gray-800 to-gray-900 text-white text-xs rounded-lg shadow-xl border border-white/10 opacity-0 invisible peer-hover:opacity-100 peer-hover:visible transition-all duration-200 ease-out delay-100 pointer-events-none z-40 backdrop-blur-sm'
