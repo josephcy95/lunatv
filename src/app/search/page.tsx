@@ -18,7 +18,6 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { SearchResult } from '@/lib/types';
-import { clusterBySameShow, preferDisplayTitle } from '@/lib/title-match';
 
 import { searchStream, type SSEChunk } from '@/lib/search-stream';
 import { reduceSearchStream } from '@/lib/search-stream-state';
@@ -401,11 +400,9 @@ function SearchPageClient() {
       });
       return res;
     })();
-    // One entry per source+id so "N源" counts Yogurt dubs/qualities separately.
-    // UI that needs unique labels should Set() itself.
-    const source_names = group
-      .map((g) => g.source_name)
-      .filter(Boolean) as string[];
+    const source_names = Array.from(
+      new Set(group.map((g) => g.source_name).filter(Boolean)),
+    ) as string[];
 
     const douban_id = (() => {
       const countMap = new Map<number, number>();
@@ -600,7 +597,7 @@ function SearchPageClient() {
     ? streamedSearchQuery.isFetching
     : traditionalSearchQuery.isFetching;
 
-  // 聚合后的结果：保守双语标题聚类，保留每个 source+id（永不丢源）
+  // 聚合后的结果（按标题和年份分组）
   const aggregatedResults = useMemo(() => {
     // 首先应用精确搜索过滤
     const filteredResults = exactSearch
@@ -609,8 +606,28 @@ function SearchPageClient() {
         )
       : searchResults;
 
-    return clusterBySameShow(filteredResults, (item) =>
-      inferBinaryType(item.type_name, item.episodes.length),
+    const map = new Map<string, SearchResult[]>();
+    const keyOrder: string[] = []; // 记录键出现的顺序
+
+    filteredResults.forEach((item) => {
+      // 使用 title + year + type 作为键，year 必然存在，但依然兜底 'unknown'
+      const key = `${item.title.replaceAll(' ', '')}-${
+        item.year || 'unknown'
+      }-${inferBinaryType(item.type_name, item.episodes.length)}`;
+      const arr = map.get(key) || [];
+
+      // 如果是新的键，记录其顺序
+      if (arr.length === 0) {
+        keyOrder.push(key);
+      }
+
+      arr.push(item);
+      map.set(key, arr);
+    });
+
+    // 按出现顺序返回聚合结果
+    return keyOrder.map(
+      (key) => [key, map.get(key)!] as [string, SearchResult[]],
     );
   }, [searchResults, exactSearch]);
 
@@ -1663,19 +1680,9 @@ function SearchPageClient() {
                   >
                     {viewMode === 'agg'
                       ? visibleAggResults.map(([mapKey, group]) => {
-                          const title =
-                            preferDisplayTitle(group.map((g) => g.title)) ||
-                            group[0]?.title ||
-                            '';
-                          const poster =
-                            group.find((g) => g.title === title)?.poster ||
-                            group[0]?.poster ||
-                            '';
-                          const year =
-                            group.find((g) => g.year && g.year !== 'unknown')
-                              ?.year ||
-                            group[0]?.year ||
-                            'unknown';
+                          const title = group[0]?.title || '';
+                          const poster = group[0]?.poster || '';
+                          const year = group[0]?.year || 'unknown';
                           const desc =
                             group.find((e) => e.desc?.trim())?.desc || '';
                           const vodRemarks =

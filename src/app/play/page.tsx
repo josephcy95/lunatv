@@ -51,10 +51,6 @@ import {
 } from '@/lib/db.client';
 import {} from '@/lib/douban.client';
 import { SearchResult } from '@/lib/types';
-import {
-  bilingualSearchVariants,
-  titlesLikelySameShow,
-} from '@/lib/title-match';
 import { searchStream } from '@/lib/search-stream';
 import { getVideoResolutionFromM3u8, VideoSourceTestResult } from '@/lib/utils';
 import { useSite } from '@/components/SiteProvider';
@@ -1534,11 +1530,6 @@ function PlayPageClient() {
       }
     }
 
-    // 双语标题拆分：罪人 Sinners → 罪人 / Sinners，提高跨源命中
-    bilingualSearchVariants(trimmed).forEach((variant) => {
-      if (!variants.includes(variant)) variants.push(variant);
-    });
-    // 也纳入 URL stitle / 播放标题另一侧语言（由调用方合并进 query 前也可）
     // 去重并返回
     return Array.from(new Set(variants));
   };
@@ -2958,70 +2949,44 @@ function PlayPageClient() {
       // 使用智能搜索变体获取全部源信息
       try {
         console.log('开始智能搜索，原始查询:', query);
-        // Merge variants from the play title AND stitle so CN-only / EN-only
-        // provider rows are discoverable from either landing URL.
-        const seedQueries = Array.from(
-          new Set(
-            [query, videoTitleRef.current, searchTitle]
-              .map((t) => (t || '').trim())
-              .filter(Boolean),
-          ),
-        );
-        const searchVariants = Array.from(
-          new Set(seedQueries.flatMap((q) => generateSearchVariants(q))),
-        );
+        const searchVariants = generateSearchVariants(query.trim());
         console.log('生成的搜索变体:', searchVariants);
 
         const allResults: SearchResult[] = [];
         let bestResults: SearchResult[] = [];
 
-        const playTitleCandidates = Array.from(
-          new Set(
-            [
-              videoTitleRef.current,
-              searchTitle,
-              ...bilingualSearchVariants(videoTitleRef.current || ''),
-              ...bilingualSearchVariants(searchTitle || ''),
-            ]
-              .map((t) => (t || '').trim())
-              .filter(Boolean),
-          ),
-        );
-
-        const resultMatchesCurrentShow = (result: SearchResult): boolean => {
-          const yearMatch = matchesRequestedYear(
-            result.year || '',
-            videoYearRef.current,
-          );
-          const resultIsMovie = inferIsMovie(
-            result.type_name,
-            result.episodes.length,
-          );
-          const typeMatch =
-            !searchType ||
-            (searchType === 'movie' ? resultIsMovie : !resultIsMovie);
-          if (!yearMatch || !typeMatch) return false;
-
-          // Douban id agreement is sufficient when both sides have one.
-          if (
-            videoDoubanIdRef.current &&
-            videoDoubanIdRef.current > 0 &&
-            result.douban_id &&
-            result.douban_id === videoDoubanIdRef.current
-          ) {
-            return true;
-          }
-
-          // Strict title identity only — never substring / CJK-contains.
-          // False-split OK; false-merge that lumps 罪人求生 / 检察方的罪人 is not.
-          for (const candidate of playTitleCandidates) {
-            if (titlesLikelySameShow(candidate, result.title)) return true;
-          }
-          return false;
-        };
-
         const publishIncrementalMatches = (results: SearchResult[]) => {
-          const matches = results.filter(resultMatchesCurrentShow);
+          const queryTitle = videoTitleRef.current
+            .replaceAll(' ', '')
+            .toLowerCase();
+          const matches = results.filter((result) => {
+            if (
+              videoDoubanIdRef.current &&
+              videoDoubanIdRef.current > 0 &&
+              result.douban_id
+            ) {
+              return result.douban_id === videoDoubanIdRef.current;
+            }
+            const resultTitle = result.title.replaceAll(' ', '').toLowerCase();
+            const titleMatch =
+              resultTitle === queryTitle ||
+              resultTitle.includes(queryTitle) ||
+              queryTitle.includes(resultTitle) ||
+              (queryTitle.length > 4 &&
+                checkAllKeywordsMatch(queryTitle, resultTitle));
+            const yearMatch = matchesRequestedYear(
+              result.year || '',
+              videoYearRef.current,
+            );
+            const resultIsMovie = inferIsMovie(
+              result.type_name,
+              result.episodes.length,
+            );
+            const typeMatch =
+              !searchType ||
+              (searchType === 'movie' ? resultIsMovie : !resultIsMovie);
+            return titleMatch && yearMatch && typeMatch;
+          });
 
           if (!matches.length) return;
           setAvailableSources((previous) => {
@@ -3077,43 +3042,236 @@ function PlayPageClient() {
           const data = { results: variantResults };
 
           if (data.results && data.results.length > 0) {
-            // UNION matches across variants — never drop a source+id because a
-            // bilingual exact hit appeared first (e.g. 罪人 Sinners exact would
-            // previously exclude Yogurt titled only 罪人 / Sinners).
-            const filteredResults = data.results.filter(
-              resultMatchesCurrentShow,
-            );
+            // 移除早期退出策略，让downstream的相关性评分发挥作用
+
+            // 处理搜索结果，使用分级匹配：精确匹配优先，避免短标题误匹配
+            const queryTitle = videoTitleRef.current
+              .replaceAll(' ', '')
+              .toLowerCase();
+
+            const matchYearAndType = (result: SearchResult) => {
+              const yearMatch = matchesRequestedYear(
+                result.year || '',
+                videoYearRef.current,
+              );
+              // 优先按 type_name 判定 movie/series，回退到集数。避免把每条只带 1 集
+              // 的 YOGURT 剧集当成电影而在换源匹配阶段被丢弃。
+              const resultIsMovie = inferIsMovie(
+                result.type_name,
+                result.episodes.length,
+              );
+              const wantMovie = searchType === 'movie';
+              const typeMatch =
+                !searchType || (wantMovie ? resultIsMovie : !resultIsMovie);
+              return yearMatch && typeMatch;
+            };
+
+            // 第一优先级：精确匹配（标题完全相等，或去除数字/标点后相等）
+            const exactResults = data.results.filter((result: SearchResult) => {
+              if (
+                videoDoubanIdRef.current &&
+                videoDoubanIdRef.current > 0 &&
+                result.douban_id
+              ) {
+                return result.douban_id === videoDoubanIdRef.current;
+              }
+              const resultTitle = result.title
+                .replaceAll(' ', '')
+                .toLowerCase();
+              const exactMatch =
+                resultTitle === queryTitle ||
+                resultTitle.replace(/\d+|[：:]/g, '') ===
+                  queryTitle.replace(/\d+|[：:]/g, '');
+              return exactMatch && matchYearAndType(result);
+            });
+
+            // 第二优先级：宽松包含匹配（仅当精确匹配无结果时使用）
+            let filteredResults = exactResults;
+            if (exactResults.length === 0) {
+              filteredResults = data.results.filter((result: SearchResult) => {
+                if (
+                  videoDoubanIdRef.current &&
+                  videoDoubanIdRef.current > 0 &&
+                  result.douban_id
+                ) {
+                  return result.douban_id === videoDoubanIdRef.current;
+                }
+                const resultTitle = result.title
+                  .replaceAll(' ', '')
+                  .toLowerCase();
+                const titleMatch =
+                  resultTitle.includes(queryTitle) ||
+                  queryTitle.includes(resultTitle) ||
+                  (queryTitle.length > 4 &&
+                    checkAllKeywordsMatch(queryTitle, resultTitle));
+                return titleMatch && matchYearAndType(result);
+              });
+            }
 
             if (filteredResults.length > 0) {
               console.log(
-                `变体 "${variant}" 找到 ${filteredResults.length} 个匹配结果（双语/同名 UNION）`,
+                `变体 "${variant}" 找到 ${filteredResults.length} 个匹配结果（${exactResults.length > 0 ? '精确' : '宽松'}匹配）`,
               );
-              const merged = new Map(
-                bestResults.map((item) => [`${item.source}-${item.id}`, item]),
-              );
-              filteredResults.forEach((item) =>
-                merged.set(`${item.source}-${item.id}`, item),
-              );
-              bestResults = Array.from(merged.values());
-              // Keep searching remaining variants so CN/EN keyword searches
-              // can discover provider rows the first query missed.
+              bestResults = filteredResults;
+              break; // 找到匹配就停止
             }
           }
         }
 
-        // No loose substring / CJK-contains fallback — false-merge is worse
-        // than an empty alternate-source list.
+        // 智能匹配：英文标题严格匹配，中文标题宽松匹配
         let finalResults = bestResults;
-        if (bestResults.length === 0 && allResults.length > 0) {
-          const strict = allResults.filter(resultMatchesCurrentShow);
-          finalResults = Array.from(
-            new Map(
-              strict.map((item) => [`${item.source}-${item.id}`, item]),
-            ).values(),
-          );
+
+        // 如果没有精确匹配，根据语言类型进行不同策略的匹配
+        if (bestResults.length === 0) {
+          const queryTitle = videoTitleRef.current.toLowerCase().trim();
+          const allCandidates = allResults;
+
+          // 检测查询主要语言（英文 vs 中文）
+          const englishChars = (queryTitle.match(/[a-z\s]/g) || []).length;
+          const chineseChars = (queryTitle.match(/[\u4e00-\u9fff]/g) || [])
+            .length;
+          const isEnglishQuery = englishChars > chineseChars;
+
           console.log(
-            `严格标题回退: ${finalResults.length}/${allResults.length}`,
+            `搜索语言检测: ${isEnglishQuery ? '英文' : '中文'} - "${queryTitle}"`,
           );
+
+          let relevantMatches;
+
+          if (isEnglishQuery) {
+            // 英文查询：使用词汇匹配策略，避免不相关结果
+            console.log('使用英文词汇匹配策略');
+
+            // 提取有效英文词汇（过滤停用词）
+            const queryWords = queryTitle
+              .toLowerCase()
+              .replace(/[^\w\s]/g, ' ')
+              .split(/\s+/)
+              .filter(
+                (word) =>
+                  word.length > 2 &&
+                  ![
+                    'the',
+                    'a',
+                    'an',
+                    'and',
+                    'or',
+                    'of',
+                    'in',
+                    'on',
+                    'at',
+                    'to',
+                    'for',
+                    'with',
+                    'by',
+                  ].includes(word),
+              );
+
+            console.log('英文关键词:', queryWords);
+
+            relevantMatches = allCandidates.filter((result) => {
+              const title = result.title.toLowerCase();
+              const titleWords = title
+                .replace(/[^\w\s]/g, ' ')
+                .split(/\s+/)
+                .filter((word) => word.length > 1);
+
+              // 计算词汇匹配度：标题必须包含至少50%的查询关键词
+              const matchedWords = queryWords.filter((queryWord) =>
+                titleWords.some(
+                  (titleWord) =>
+                    titleWord.includes(queryWord) ||
+                    queryWord.includes(titleWord) ||
+                    // 允许部分相似（如gumball vs gum）
+                    (queryWord.length > 4 &&
+                      titleWord.length > 4 &&
+                      queryWord.substring(0, 4) === titleWord.substring(0, 4)),
+                ),
+              );
+
+              const wordMatchRatio = matchedWords.length / queryWords.length;
+              if (wordMatchRatio >= 0.5) {
+                console.log(
+                  `英文词汇匹配 (${matchedWords.length}/${queryWords.length}): "${result.title}" - 匹配词: [${matchedWords.join(', ')}]`,
+                );
+                return true;
+              }
+              return false;
+            });
+          } else {
+            // 中文查询：宽松匹配，保持现有行为
+            console.log('使用中文匹配策略（精确优先）');
+            const normalizedQuery = queryTitle.replace(
+              /[^\w\u4e00-\u9fff]/g,
+              '',
+            );
+
+            // 先尝试精确匹配
+            const exactChinese = allCandidates.filter((result) => {
+              const normalizedTitle = result.title
+                .toLowerCase()
+                .replace(/[^\w\u4e00-\u9fff]/g, '');
+              const isExact =
+                normalizedTitle === normalizedQuery ||
+                normalizedTitle.replace(/\d+/g, '') ===
+                  normalizedQuery.replace(/\d+/g, '');
+              if (isExact) console.log(`中文精确匹配: "${result.title}"`);
+              return isExact;
+            });
+
+            if (exactChinese.length > 0) {
+              relevantMatches = exactChinese;
+            } else {
+              // 精确无结果，降级到包含匹配
+              relevantMatches = allCandidates.filter((result) => {
+                const title = result.title.toLowerCase();
+                const normalizedTitle = title.replace(
+                  /[^\w\u4e00-\u9fff]/g,
+                  '',
+                );
+
+                if (
+                  normalizedTitle.includes(normalizedQuery) ||
+                  normalizedQuery.includes(normalizedTitle)
+                ) {
+                  console.log(`中文包含匹配: "${result.title}"`);
+                  return true;
+                }
+
+                const commonChars = Array.from(normalizedQuery).filter((char) =>
+                  normalizedTitle.includes(char),
+                ).length;
+                const similarity = commonChars / normalizedQuery.length;
+                if (similarity >= 0.5) {
+                  console.log(
+                    `中文相似匹配 (${(similarity * 100).toFixed(1)}%): "${result.title}"`,
+                  );
+                  return true;
+                }
+                return false;
+              });
+            }
+          }
+
+          console.log(
+            `匹配结果: ${relevantMatches.length}/${allCandidates.length}`,
+          );
+
+          // 如果有匹配结果，直接返回（去重）
+          if (relevantMatches.length > 0) {
+            finalResults = Array.from(
+              new Map(
+                relevantMatches.map((item) => [
+                  `${item.source}-${item.id}`,
+                  item,
+                ]),
+              ).values(),
+            ) as SearchResult[];
+            console.log(`找到 ${finalResults.length} 个唯一匹配结果`);
+          } else {
+            console.log('没有找到合理的匹配，返回空结果');
+            finalResults = [];
+          }
         }
 
         console.log(`智能搜索完成，最终返回 ${finalResults.length} 个结果`);
@@ -5550,7 +5708,7 @@ function PlayPageClient() {
             }
             tmdbPoster={tmdbData?.poster}
             tmdbOverview={tmdbData?.overview}
-            tmdbTitle={tmdbData?.englishTitle || tmdbData?.title}
+            tmdbTitle={tmdbData?.title}
             tmdbRating={tmdbData?.rating}
             tmdbLogo={tmdbData?.logo}
             tmdbNumberOfSeasons={tmdbData?.numberOfSeasons}

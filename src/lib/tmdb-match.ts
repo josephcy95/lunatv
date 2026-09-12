@@ -123,38 +123,7 @@ export function titleSimilarity(
   if (q.includes(c) || c.includes(q)) {
     const shorter = Math.min(q.length, c.length);
     const longer = Math.max(q.length, c.length);
-    const ratio = shorter / longer;
-    // "The Sinners" ≈ "Sinners" (article-only extras) stays strong;
-    // "The Tree of Sinners" vs "Sinners" has extra content words → weak.
-    const stop = new Set([
-      'the',
-      'a',
-      'an',
-      'and',
-      'or',
-      'of',
-      'in',
-      'on',
-      'at',
-      'to',
-      'for',
-      'with',
-      'by',
-    ]);
-    const qWords = q.split(' ').filter(Boolean);
-    const cWords = c.split(' ').filter(Boolean);
-    const shorterWords = qWords.length <= cWords.length ? qWords : cWords;
-    const longerWords = qWords.length <= cWords.length ? cWords : qWords;
-    const shorterSet = new Set(shorterWords);
-    const extraSignificant = longerWords.filter(
-      (w) => !shorterSet.has(w) && !stop.has(w),
-    );
-    if (extraSignificant.length === 0) {
-      // only stopwords / identical tokens differ
-      return 0.92 + 0.08 * ratio;
-    }
-    // Content-bearing expansion of a short query — soft partial only
-    return 0.2 + 0.25 * ratio;
+    return 0.6 + 0.4 * (shorter / longer);
   }
 
   // token overlap for multi-word English titles
@@ -312,45 +281,13 @@ export function rankTMDBCandidates(
 export interface PickBestOptions {
   /** Soft threshold; if best is below, still return best when allowFallback. Default modest. */
   threshold?: number;
-  /** When true, return highest score even if not confident. Default false (prefer none). */
+  /** When true (default), return highest score even below threshold if any candidates. */
   allowFallback?: boolean;
 }
 
 /**
- * True when the top hit looks confidently correct enough to attach metadata.
- * Wrong metadata is worse than none — reject weak substring / year-mismatch hits.
- */
-export function isConfidentTMDBMatch(
-  best: ScoredCandidate,
-  ranked: ScoredCandidate[] = [best],
-): boolean {
-  const { title, altTitle, year } = best.breakdown;
-  // Far-off year with non-exact primary title → reject
-  if (year < 0 && title < 54) return false;
-  // Strong primary or exact/near-exact alt title with non-penalized year
-  if (year >= 0 && (title >= 45 || altTitle >= 50)) return true;
-  // Solid alt + year agreement
-  if (year >= 18 && altTitle >= 34 && title + altTitle >= 50) return true;
-  // High overall score with decent title agreement
-  if (best.score >= 70 && year >= 0 && (title >= 35 || altTitle >= 34)) {
-    return true;
-  }
-  // Ambiguous pool: top two close and neither has strong title → reject
-  if (ranked.length >= 2) {
-    const second = ranked[1];
-    const close = best.score - second.score < 12;
-    const weak = title < 45 && altTitle < 50;
-    if (close && weak) return false;
-  }
-  return (
-    best.score >= TMDB_MATCH_MODEST_THRESHOLD + 20 && year >= 0 && title >= 40
-  );
-}
-
-/**
- * Pick the best candidate. Prefers high score; by default refuses ambiguous
- * / weak matches (wrong metadata is worse than sparse). Pass allowFallback
- * true only when a best-effort hit is explicitly desired.
+ * Pick the best candidate. Soft: prefers high score, never returns null
+ * when candidates exist and allowFallback is true (default).
  */
 export function pickBestTMDBCandidate(
   candidates: TMDBSearchCandidate[],
@@ -361,10 +298,9 @@ export function pickBestTMDBCandidate(
   const ranked = rankTMDBCandidates(candidates, matchQuery);
   const best = ranked[0];
   const threshold = options.threshold ?? TMDB_MATCH_MODEST_THRESHOLD;
-  const allowFallback = options.allowFallback === true;
-  if (best.score < threshold && !allowFallback) return null;
-  if (allowFallback) return best;
-  return isConfidentTMDBMatch(best, ranked) ? best : null;
+  const allowFallback = options.allowFallback !== false;
+  if (best.score >= threshold || allowFallback) return best;
+  return null;
 }
 
 /** How many top ambiguous hits to enrich with alternative_titles. */

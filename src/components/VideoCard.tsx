@@ -1156,9 +1156,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
               dynamicSourceNames &&
               dynamicSourceNames.length > 0 &&
               (() => {
-                // Count every stream (source+id), including multiple Yogurt ids.
-                const sourceCount = dynamicSourceNames.length;
                 const uniqueSources = Array.from(new Set(dynamicSourceNames));
+                const sourceCount = uniqueSources.length;
 
                 return (
                   <div
