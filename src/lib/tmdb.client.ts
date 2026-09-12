@@ -168,8 +168,8 @@ export async function searchTMDBMovie(
   vote_average: number;
 } | null> {
   try {
-    // v2 cache: soft scorer (avoid reusing first-result poison)
-    const cacheKey = getCacheKey('movie_search_v3', {
+    // v4 cache: bust TRY1 misses; soft scorer + confident pick
+    const cacheKey = getCacheKey('movie_search_v4', {
       title: title.trim(),
       year: year || '',
     });
@@ -268,7 +268,7 @@ export async function searchTMDBTV(
   vote_average: number;
 } | null> {
   try {
-    const cacheKey = getCacheKey('tv_search_v3', {
+    const cacheKey = getCacheKey('tv_search_v4', {
       title: title.trim(),
       year: year || '',
     });

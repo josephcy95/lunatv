@@ -81,9 +81,50 @@ export function yearsCompatible(a?: string | null, b?: string | null): boolean {
 }
 
 /**
+ * Trailing edition / localization markers that do NOT make a different show.
+ * Extra content words (求生, 检察方的, …) are NOT listed here.
+ */
+const EDITION_SUFFIX_RE =
+  /(?:美国版|国际版|日语版|粤语版|国语版|中文版|英文版|台版|港版|剧场版|配音版|字幕版|配音|字幕)+$/u;
+
+/** Strip known edition suffixes from a normalized title key. */
+export function stripEditionSuffixes(input: string): string {
+  let s = normalizeTitleKey(input);
+  if (!s) return '';
+  for (let i = 0; i < 4; i++) {
+    const next = s.replace(EDITION_SUFFIX_RE, '').replace(/\s+/g, ' ').trim();
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+function coreTitlesLikelySameShow(pa: TitleParts, pb: TitleParts): boolean {
+  if (!pa.normalized || !pb.normalized) return false;
+  if (pa.normalized === pb.normalized) return true;
+
+  // Both have CJK: require exact CJK equality (not substring); latin optional.
+  if (pa.cjk && pb.cjk) {
+    if (pa.cjk !== pb.cjk) return false;
+    if (!pa.latin || !pb.latin) return true;
+    return pa.latin === pb.latin;
+  }
+
+  // Shared exact latin title (full significant-token form — not subset).
+  // "sinners" === "sinners" for "Sinners" vs "罪人 Sinners".
+  if (pa.latin && pb.latin && pa.latin === pb.latin) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Conservative same-show check across CN / EN / bilingual provider titles.
- * Does NOT treat "Sinners" as the same as "In the Land of Saints and Sinners"
- * or "PSYCHO-PASS ... Sinners of the System".
+ * Exact normalized / exact full CJK / exact significant Latin / bilingual
+ * bridge / same base + edition suffix only. Extra content words = different.
+ * Does NOT treat "Sinners" as "In the Land of Saints and Sinners",
+ * "罪人" as "罪人求生" / "检察方的罪人", or Tree-of-Sinners false friends.
  */
 export function titlesLikelySameShow(
   a: string | null | undefined,
@@ -91,29 +132,17 @@ export function titlesLikelySameShow(
 ): boolean {
   const pa = extractTitleParts(a);
   const pb = extractTitleParts(b);
-  if (!pa.normalized || !pb.normalized) return false;
-  if (pa.normalized === pb.normalized) return true;
+  if (coreTitlesLikelySameShow(pa, pb)) return true;
 
-  // Both have CJK: require exact CJK equality; latin may be missing on one side.
-  if (pa.cjk && pb.cjk) {
-    if (pa.cjk !== pb.cjk) return false;
-    if (!pa.latin || !pb.latin) return true;
-    return pa.latin === pb.latin;
+  // Same base + edition suffix only (罪人 ↔ 罪人美国版 / 日语版 / …).
+  const ea = extractTitleParts(stripEditionSuffixes(pa.normalized));
+  const eb = extractTitleParts(stripEditionSuffixes(pb.normalized));
+  if (!ea.normalized || !eb.normalized) return false;
+  if (ea.normalized === pa.normalized && eb.normalized === pb.normalized) {
+    // Nothing stripped — already failed core check.
+    return false;
   }
-
-  // Shared exact latin title string (full significant-token form).
-  // "sinners" === "sinners" for "Sinners" vs "罪人 Sinners".
-  if (pa.latin && pb.latin && pa.latin === pb.latin) {
-    return true;
-  }
-
-  // One side CJK-only, other bilingual with that CJK — handled above when both
-  // have cjk. CJK-only vs latin-only: do not guess without a shared token set.
-  if (pa.cjk && !pb.cjk && pb.latin && pa.normalized === pb.normalized) {
-    return true;
-  }
-
-  return false;
+  return coreTitlesLikelySameShow(ea, eb);
 }
 
 /** Prefer bilingual / longer display title when clustering. */

@@ -31,8 +31,8 @@ export async function GET(request: NextRequest) {
   const apiKey = config.SiteConfig?.TMDBApiKey;
   if (!apiKey) return NextResponse.json({ data: null });
 
-  // v2: soft scorer + year hint — bust poisoned first-result caches
-  const cacheKey = `tmdb-backdrop-v3-${originalTitle || title}-${year || ''}-${stype || ''}`;
+  // v4: bust TRY1 null/poison caches; prefer confident Sinners 1233413
+  const cacheKey = `tmdb-backdrop-v4-${originalTitle || title}-${year || ''}-${stype || ''}`;
 
   // 服务端缓存 — ignore legacy entries missing tmdb id (needed for MDBList)
   const cached = await db.getCache(cacheKey);
@@ -315,15 +315,17 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // 写入服务端缓存
+  // 写入服务端缓存 — never persist a miss (avoid negative-cache poisoning)
   if (data) await db.setCache(cacheKey, data, CACHE_TTL);
 
   return NextResponse.json(
     { data },
     {
       headers: {
-        'Cache-Control':
-          'public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800',
+        // Misses must not be CDN/browser-cached or RT/alias stay blank for a day
+        'Cache-Control': data
+          ? 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800'
+          : 'no-store',
       },
     },
   );

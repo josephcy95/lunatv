@@ -12,6 +12,7 @@ import {
 import {
   bilingualSearchVariants,
   clusterBySameShow,
+  stripEditionSuffixes,
   titlesLikelySameShow,
 } from './title-match';
 
@@ -260,6 +261,38 @@ describe('2025 Sinners / 罪人 → TMDB 1233413 not Tree of Sinners', () => {
       ),
     ).toBe(false);
   });
+
+  it('罪人 + 2025 alone is confident for MDBList/alias (zh or en+alt)', () => {
+    const zh = pickBestTMDBCandidate([correctZh], {
+      query: '罪人',
+      year: '2025',
+      mediaType: 'movie',
+    });
+    expect(zh?.candidate.id).toBe(1233413);
+    expect(isConfidentTMDBMatch(zh!)).toBe(true);
+
+    const en = pickBestTMDBCandidate([correct], {
+      query: '罪人',
+      secondaryQuery: 'Sinners',
+      year: '2025',
+      mediaType: 'movie',
+    });
+    expect(en?.candidate.id).toBe(1233413);
+    expect(isConfidentTMDBMatch(en!)).toBe(true);
+
+    // Never attach Tree of Sinners when year agrees by accident on alt 罪人
+    const treeSameYear = {
+      ...tree,
+      release_date: '2025-01-01',
+    };
+    const mixed = pickBestTMDBCandidate([treeSameYear, correct], {
+      query: '罪人',
+      secondaryQuery: 'Sinners',
+      year: '2025',
+      mediaType: 'movie',
+    });
+    expect(mixed?.candidate.id).toBe(1233413);
+  });
 });
 
 describe('titlesLikelySameShow / clusterBySameShow', () => {
@@ -277,15 +310,61 @@ describe('titlesLikelySameShow / clusterBySameShow', () => {
     ).toBe(false);
   });
 
+  it('keeps edition suffixes of the same film; drops extra-content titles', () => {
+    expect(stripEditionSuffixes('罪人美国版')).toBe('罪人');
+    expect(stripEditionSuffixes('检察方的罪人 日语版')).toBe('检察方的罪人');
+
+    // KEEP — same show / edition only
+    expect(titlesLikelySameShow('罪人', '罪人')).toBe(true);
+    expect(titlesLikelySameShow('罪人', '罪人美国版')).toBe(true);
+    expect(titlesLikelySameShow('罪人美国版', '罪人 国际版')).toBe(true);
+    expect(titlesLikelySameShow('检察方的罪人', '检察方的罪人 日语版')).toBe(
+      true,
+    );
+
+    // DROP — extra content words = different show
+    expect(titlesLikelySameShow('罪人', '罪人求生')).toBe(false);
+    expect(titlesLikelySameShow('罪人', '检察方的罪人')).toBe(false);
+    expect(titlesLikelySameShow('罪人', '检察方的罪人 日语版')).toBe(false);
+    expect(titlesLikelySameShow('罪人', '厄夜追缉令')).toBe(false);
+    expect(
+      titlesLikelySameShow('罪人', 'In the Land of Saints and Sinners'),
+    ).toBe(false);
+  });
+
   it('keeps both Yogurt ids when clustering same show', () => {
     const items = [
       { title: 'Sinners', year: '2025', source: 'YOGURT', id: '2137530' },
       { title: '罪人', year: '2025', source: 'YOGURT', id: '2137458' },
       {
+        title: '罪人美国版',
+        year: '2025',
+        source: 'YOGURT',
+        id: '2137458b',
+      },
+      {
         title: '罪人 Sinners',
         year: '2025',
         source: 'www.maoyanzy.com',
         id: '150612',
+      },
+      {
+        title: '罪人求生',
+        year: '2025',
+        source: 'YOGURT',
+        id: 'condemned',
+      },
+      {
+        title: '检察方的罪人',
+        year: '2018',
+        source: 'YOGURT',
+        id: 'prosecution',
+      },
+      {
+        title: '检察方的罪人 日语版',
+        year: '2018',
+        source: 'YOGURT',
+        id: 'prosecution-jp',
       },
       {
         title: 'In the Land of Saints and Sinners',
@@ -302,10 +381,25 @@ describe('titlesLikelySameShow / clusterBySameShow', () => {
     );
     expect(sinnersCluster).toBeTruthy();
     const ids = sinnersCluster![1].map((x) => x.id).sort();
-    expect(ids).toEqual(['150612', '2137458', '2137530'].sort());
-    // both yogurt ids present
+    expect(ids).toEqual(['150612', '2137458', '2137458b', '2137530'].sort());
     expect(ids).toContain('2137530');
     expect(ids).toContain('2137458');
+    expect(ids).not.toContain('condemned');
+    expect(ids).not.toContain('prosecution');
+    expect(ids).not.toContain('prosecution-jp');
+    expect(ids).not.toContain('9');
+
+    // Distinct CJK titles stay in their own clusters
+    const condemned = clusters.find(([, g]) =>
+      g.some((x) => x.id === 'condemned'),
+    );
+    expect(condemned![1]).toHaveLength(1);
+    const prosecution = clusters.find(([, g]) =>
+      g.some((x) => x.id === 'prosecution'),
+    );
+    expect(prosecution![1].map((x) => x.id).sort()).toEqual(
+      ['prosecution', 'prosecution-jp'].sort(),
+    );
   });
 
   it('bilingualSearchVariants extracts CN and EN', () => {

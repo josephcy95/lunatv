@@ -3012,35 +3012,10 @@ function PlayPageClient() {
             return true;
           }
 
-          // Never let a *different* douban_id short-circuit title matching away;
-          // only positive agreement above is special-cased.
+          // Strict title identity only — never substring / CJK-contains.
+          // False-split OK; false-merge that lumps 罪人求生 / 检察方的罪人 is not.
           for (const candidate of playTitleCandidates) {
             if (titlesLikelySameShow(candidate, result.title)) return true;
-            const queryTitle = candidate.replaceAll(' ', '').toLowerCase();
-            const resultTitle = result.title.replaceAll(' ', '').toLowerCase();
-            if (
-              resultTitle === queryTitle ||
-              resultTitle.includes(queryTitle) ||
-              queryTitle.includes(resultTitle) ||
-              (queryTitle.length > 4 &&
-                checkAllKeywordsMatch(queryTitle, resultTitle))
-            ) {
-              // Guard short Latin titles: "Sinners" must not absorb
-              // "In the Land of Saints and Sinners" via includes alone.
-              if (
-                titlesLikelySameShow(candidate, result.title) ||
-                resultTitle === queryTitle ||
-                // bilingual / CJK contains still OK
-                /[㐀-鿿]/.test(candidate) ||
-                /[㐀-鿿]/.test(result.title) ||
-                // equal significant length ratio for latin contains
-                Math.min(queryTitle.length, resultTitle.length) /
-                  Math.max(queryTitle.length, resultTitle.length) >=
-                  0.6
-              ) {
-                return true;
-              }
-            }
           }
           return false;
         };
@@ -3126,160 +3101,19 @@ function PlayPageClient() {
           }
         }
 
-        // 智能匹配：英文标题严格匹配，中文标题宽松匹配
+        // No loose substring / CJK-contains fallback — false-merge is worse
+        // than an empty alternate-source list.
         let finalResults = bestResults;
-
-        // 如果没有精确匹配，根据语言类型进行不同策略的匹配
-        if (bestResults.length === 0) {
-          const queryTitle = videoTitleRef.current.toLowerCase().trim();
-          const allCandidates = allResults;
-
-          // 检测查询主要语言（英文 vs 中文）
-          const englishChars = (queryTitle.match(/[a-z\s]/g) || []).length;
-          const chineseChars = (queryTitle.match(/[\u4e00-\u9fff]/g) || [])
-            .length;
-          const isEnglishQuery = englishChars > chineseChars;
-
-          console.log(
-            `搜索语言检测: ${isEnglishQuery ? '英文' : '中文'} - "${queryTitle}"`,
+        if (bestResults.length === 0 && allResults.length > 0) {
+          const strict = allResults.filter(resultMatchesCurrentShow);
+          finalResults = Array.from(
+            new Map(
+              strict.map((item) => [`${item.source}-${item.id}`, item]),
+            ).values(),
           );
-
-          let relevantMatches;
-
-          if (isEnglishQuery) {
-            // 英文查询：使用词汇匹配策略，避免不相关结果
-            console.log('使用英文词汇匹配策略');
-
-            // 提取有效英文词汇（过滤停用词）
-            const queryWords = queryTitle
-              .toLowerCase()
-              .replace(/[^\w\s]/g, ' ')
-              .split(/\s+/)
-              .filter(
-                (word) =>
-                  word.length > 2 &&
-                  ![
-                    'the',
-                    'a',
-                    'an',
-                    'and',
-                    'or',
-                    'of',
-                    'in',
-                    'on',
-                    'at',
-                    'to',
-                    'for',
-                    'with',
-                    'by',
-                  ].includes(word),
-              );
-
-            console.log('英文关键词:', queryWords);
-
-            relevantMatches = allCandidates.filter((result) => {
-              const title = result.title.toLowerCase();
-              const titleWords = title
-                .replace(/[^\w\s]/g, ' ')
-                .split(/\s+/)
-                .filter((word) => word.length > 1);
-
-              // 计算词汇匹配度：标题必须包含至少50%的查询关键词
-              const matchedWords = queryWords.filter((queryWord) =>
-                titleWords.some(
-                  (titleWord) =>
-                    titleWord.includes(queryWord) ||
-                    queryWord.includes(titleWord) ||
-                    // 允许部分相似（如gumball vs gum）
-                    (queryWord.length > 4 &&
-                      titleWord.length > 4 &&
-                      queryWord.substring(0, 4) === titleWord.substring(0, 4)),
-                ),
-              );
-
-              const wordMatchRatio = matchedWords.length / queryWords.length;
-              if (wordMatchRatio >= 0.5) {
-                console.log(
-                  `英文词汇匹配 (${matchedWords.length}/${queryWords.length}): "${result.title}" - 匹配词: [${matchedWords.join(', ')}]`,
-                );
-                return true;
-              }
-              return false;
-            });
-          } else {
-            // 中文查询：宽松匹配，保持现有行为
-            console.log('使用中文匹配策略（精确优先）');
-            const normalizedQuery = queryTitle.replace(
-              /[^\w\u4e00-\u9fff]/g,
-              '',
-            );
-
-            // 先尝试精确匹配
-            const exactChinese = allCandidates.filter((result) => {
-              const normalizedTitle = result.title
-                .toLowerCase()
-                .replace(/[^\w\u4e00-\u9fff]/g, '');
-              const isExact =
-                normalizedTitle === normalizedQuery ||
-                normalizedTitle.replace(/\d+/g, '') ===
-                  normalizedQuery.replace(/\d+/g, '');
-              if (isExact) console.log(`中文精确匹配: "${result.title}"`);
-              return isExact;
-            });
-
-            if (exactChinese.length > 0) {
-              relevantMatches = exactChinese;
-            } else {
-              // 精确无结果，降级到包含匹配
-              relevantMatches = allCandidates.filter((result) => {
-                const title = result.title.toLowerCase();
-                const normalizedTitle = title.replace(
-                  /[^\w\u4e00-\u9fff]/g,
-                  '',
-                );
-
-                if (
-                  normalizedTitle.includes(normalizedQuery) ||
-                  normalizedQuery.includes(normalizedTitle)
-                ) {
-                  console.log(`中文包含匹配: "${result.title}"`);
-                  return true;
-                }
-
-                const commonChars = Array.from(normalizedQuery).filter((char) =>
-                  normalizedTitle.includes(char),
-                ).length;
-                const similarity = commonChars / normalizedQuery.length;
-                if (similarity >= 0.5) {
-                  console.log(
-                    `中文相似匹配 (${(similarity * 100).toFixed(1)}%): "${result.title}"`,
-                  );
-                  return true;
-                }
-                return false;
-              });
-            }
-          }
-
           console.log(
-            `匹配结果: ${relevantMatches.length}/${allCandidates.length}`,
+            `严格标题回退: ${finalResults.length}/${allResults.length}`,
           );
-
-          // 如果有匹配结果，直接返回（去重）
-          if (relevantMatches.length > 0) {
-            finalResults = Array.from(
-              new Map(
-                relevantMatches.map((item) => [
-                  `${item.source}-${item.id}`,
-                  item,
-                ]),
-              ).values(),
-            ) as SearchResult[];
-            console.log(`找到 ${finalResults.length} 个唯一匹配结果`);
-          } else {
-            console.log('没有找到合理的匹配，返回空结果');
-            finalResults = [];
-          }
         }
 
         console.log(`智能搜索完成，最终返回 ${finalResults.length} 个结果`);
@@ -5716,7 +5550,7 @@ function PlayPageClient() {
             }
             tmdbPoster={tmdbData?.poster}
             tmdbOverview={tmdbData?.overview}
-            tmdbTitle={tmdbData?.title}
+            tmdbTitle={tmdbData?.englishTitle || tmdbData?.title}
             tmdbRating={tmdbData?.rating}
             tmdbLogo={tmdbData?.logo}
             tmdbNumberOfSeasons={tmdbData?.numberOfSeasons}
