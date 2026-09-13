@@ -30,6 +30,7 @@ import {
   applyDanmuVisibility,
   countEmittingDanmu,
   DANMU_MARGIN_OPTION,
+  DANMU_SPEED_OPTION,
   loadDanmuIntoPlugin,
   maxVisibleForDensity,
   mountNativeDensitySlider,
@@ -153,7 +154,7 @@ function savePreferredAudioLang(rawLang?: string) {
   }
 }
 
-const PLAYBACK_RATE_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const PLAYBACK_RATE_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const NEXT_EPISODE_CONTROL_HTML = `
   <span class="art-icon art-next-episode-control" aria-hidden="true">
     <svg viewBox="0 0 24 24" focusable="false" role="img">
@@ -4788,12 +4789,13 @@ function PlayPageClient() {
                     mode: 0,
                     emitter: false,
                     heatmap: false,
-                    synchronousPlayback: true,
+                    synchronousPlayback: false,
                     width: 300,
                     maxLength: 50,
                     lockTime: 1,
                     theme: 'dark',
                     MARGIN: DANMU_MARGIN_OPTION,
+                    SPEED: DANMU_SPEED_OPTION,
                     beforeVisible: () => {
                       const max = maxVisibleForDensity(
                         danmuSettingsRef.current.density,

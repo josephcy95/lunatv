@@ -17,6 +17,8 @@ import {
   areaIndexFromMargin,
   clampDanmuDensity,
   DANMU_AREA_STEPS,
+  DANMU_SPEED_MAX,
+  DANMU_SPEED_MIN,
   densityLabel,
   marginFromAreaIndex,
 } from '@/lib/player/danmu';
@@ -732,8 +734,8 @@ export const DanmuSettingsPanel = memo(function DanmuSettingsPanel({
                 <div className='relative flex-1'>
                   <input
                     type='range'
-                    min={1}
-                    max={10}
+                    min={DANMU_SPEED_MIN}
+                    max={DANMU_SPEED_MAX}
                     step={1}
                     value={sliderSpeed}
                     onChange={(e) => setSliderSpeed(parseFloat(e.target.value))}
@@ -742,7 +744,7 @@ export const DanmuSettingsPanel = memo(function DanmuSettingsPanel({
                     onBlur={commitSpeed}
                     className='w-full h-2 rounded-full appearance-none cursor-pointer transition-all'
                     style={{
-                      background: `linear-gradient(to right, #10b981 0%, #10b981 ${((sliderSpeed - 1) / (10 - 1)) * 100}%, rgba(75, 85, 99, 0.5) ${((sliderSpeed - 1) / (10 - 1)) * 100}%, rgba(75, 85, 99, 0.5) 100%)`,
+                      background: `linear-gradient(to right, #10b981 0%, #10b981 ${((sliderSpeed - DANMU_SPEED_MIN) / (DANMU_SPEED_MAX - DANMU_SPEED_MIN)) * 100}%, rgba(75, 85, 99, 0.5) ${((sliderSpeed - DANMU_SPEED_MIN) / (DANMU_SPEED_MAX - DANMU_SPEED_MIN)) * 100}%, rgba(75, 85, 99, 0.5) 100%)`,
                     }}
                   />
                 </div>

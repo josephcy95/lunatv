@@ -83,6 +83,33 @@ export const DANMU_MARGIN_OPTION = {
   })),
 };
 
+/** Higher value = slower. Dropped 快/极快; added two grades slower than 极慢. */
+export const DANMU_SPEED_STEPS: {
+  name: string;
+  value: number;
+  hide?: boolean;
+}[] = [
+  { name: '最慢', value: 20 },
+  { name: '很慢', value: 14 },
+  { name: '极慢', value: 10 },
+  { name: '较慢', value: 7.5, hide: true },
+  { name: '适中', value: 5 },
+];
+
+export const DANMU_SPEED_OPTION = {
+  min: 0,
+  max: DANMU_SPEED_STEPS.length - 1,
+  steps: DANMU_SPEED_STEPS,
+};
+
+export const DANMU_SPEED_MIN = 5;
+export const DANMU_SPEED_MAX = 20;
+
+export function clampDanmuSpeed(speed: number): number {
+  if (!Number.isFinite(speed)) return 5;
+  return Math.min(DANMU_SPEED_MAX, Math.max(DANMU_SPEED_MIN, speed));
+}
+
 const DENSITY_MAX_VISIBLE = [8, 14, 22, 32, 44, 60] as const;
 
 export const DANMU_DENSITY_STEPS: {
@@ -201,8 +228,10 @@ export function readStoredDanmuSettings(): StoredDanmuSettings {
     fontSize: Number(
       localStorage.getItem(STORAGE.fontSize) || DEFAULT_DANMU_SETTINGS.fontSize,
     ),
-    speed: Number(
-      localStorage.getItem(STORAGE.speed) || DEFAULT_DANMU_SETTINGS.speed,
+    speed: clampDanmuSpeed(
+      Number(
+        localStorage.getItem(STORAGE.speed) || DEFAULT_DANMU_SETTINGS.speed,
+      ),
     ),
     opacity: Number(
       localStorage.getItem(STORAGE.opacity) || DEFAULT_DANMU_SETTINGS.opacity,
