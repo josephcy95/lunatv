@@ -816,7 +816,9 @@ function PlayPageClient() {
     const plugin = artPlayerRef.current.plugins?.artplayerPluginDanmuku;
     if (!plugin) {
       console.error('[Danmu] ArtPlayer danmu plugin is missing');
-      artPlayerRef.current.notice?.show?.('弹幕插件未加载，请刷新页面');
+      if (artPlayerRef.current.notice) {
+        artPlayerRef.current.notice.show = '弹幕插件未加载，请刷新页面';
+      }
       return;
     }
     let cancelled = false;
@@ -826,9 +828,10 @@ function PlayPageClient() {
         if (cancelled) return;
         console.info('[Danmu] API data received:', count);
         if (count === 0) {
-          artPlayerRef.current?.notice?.show?.(
-            '弹幕 API 返回 0 条，请检查片名与集数匹配',
-          );
+          if (artPlayerRef.current?.notice) {
+            artPlayerRef.current.notice.show =
+              '弹幕 API 返回 0 条，请检查片名与集数匹配';
+          }
         }
         const current = artPlayerRef.current?.plugins?.artplayerPluginDanmuku;
         if (current !== plugin) return;
@@ -855,9 +858,10 @@ function PlayPageClient() {
       .catch((error) => {
         if (cancelled) return;
         console.error('[Danmu] Player load failed:', error);
-        artPlayerRef.current?.notice?.show?.(
-          '弹幕加载失败，请打开弹幕设置查看详情',
-        );
+        if (artPlayerRef.current?.notice) {
+          artPlayerRef.current.notice.show =
+            '弹幕加载失败，请打开弹幕设置查看详情';
+        }
       });
     return () => {
       cancelled = true;
