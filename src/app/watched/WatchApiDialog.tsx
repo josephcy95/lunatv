@@ -36,6 +36,37 @@ How to interpret it:
 Task: fetch my history first (start with ?format=text), then recommend titles I have not watched yet that match my taste. For each recommendation, say which of my watched titles it relates to and why.`;
 }
 
+/**
+ * navigator.clipboard only exists in secure contexts (HTTPS / localhost), so
+ * self-hosted LAN http:// deployments fall back to execCommand.
+ */
+async function copyText(text: string): Promise<boolean> {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      /* fall through */
+    }
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.top = '0';
+  ta.style.left = '0';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    ta.remove();
+  }
+}
+
 export default function WatchApiDialog({ open, onClose }: Props) {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,12 +112,11 @@ export default function WatchApiDialog({ open, onClose }: Props) {
   }, [open, onClose]);
 
   const copy = async (id: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyText(text)) {
       setCopied(id);
       setTimeout(() => setCopied((c) => (c === id ? null : c)), 1600);
-    } catch {
-      toast.error('复制失败，请手动选择文本复制');
+    } else {
+      toast.error('复制失败，请点击文本框手动全选复制');
     }
   };
 
@@ -192,12 +222,14 @@ export default function WatchApiDialog({ open, onClose }: Props) {
                     {r.label}
                   </p>
                   <div className='flex items-stretch gap-1.5'>
-                    <code
-                      className='min-w-0 flex-1 truncate rounded-lg border border-gray-200 bg-white/70 px-2.5 py-2 font-mono text-xs text-gray-800 dark:border-gray-700 dark:bg-gray-950/50 dark:text-gray-200'
+                    <input
+                      readOnly
+                      value={r.value}
+                      aria-label={r.label}
                       title={r.value}
-                    >
-                      {r.value}
-                    </code>
+                      onFocus={(e) => e.currentTarget.select()}
+                      className='min-w-0 flex-1 truncate rounded-lg border border-gray-200 bg-white/70 px-2.5 py-2 font-mono text-xs text-gray-800 outline-none focus:ring-2 focus:ring-green-500/40 dark:border-gray-700 dark:bg-gray-950/50 dark:text-gray-200'
+                    />
                     <button
                       type='button'
                       onClick={() => copy(r.id, r.value)}
