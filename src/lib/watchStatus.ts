@@ -39,6 +39,8 @@ export interface WatchStatus {
 
 export interface UserWatchData {
   items: Record<string, WatchStatus>;
+  /** Read-only key for GET /api/v1/watched (see docs/features/watched-api.md) */
+  api_key?: string;
 }
 
 export interface UserTraktTokens {
@@ -59,6 +61,8 @@ export interface UserSimklTokens {
   token_type?: string;
   scope?: string;
   simkl_username?: string;
+  /** Last manual two-way sync (ms) */
+  last_full_sync_at?: number;
   /** Watermark from GET /sync/activities → activities.all */
   last_sync?: string;
 }

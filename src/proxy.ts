@@ -165,6 +165,7 @@ function shouldSkipAuth(pathname: string): boolean {
     '/screenshot.png',
     '/api/cache/', // 缓存 API 端点（内部使用，无需认证）
     '/api/client-log', // 客户端日志收集端点（无需认证）
+    '/api/v1/watched', // 观看记录只读 API（路由内用 API key 鉴权）
   ];
 
   return skipPaths.some((path) => pathname.startsWith(path));

@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     appConfigured: Boolean(creds),
     connected: Boolean(tokens?.access_token),
     simklUsername: tokens?.simkl_username || null,
+    lastFullSyncAt: tokens?.last_full_sync_at || null,
     /** PIN is primary; redirect only on public https + secret. */
     authMode: 'pin' as const,
     redirectAvailable,
